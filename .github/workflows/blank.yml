@@ -33,6 +33,9 @@ jobs:
         echo test, and deploy your project.
         
     - name: build
+      timeout-minutes: 1
       run: |
         gcc -pthread answer.c
         echo completed build, maybe?
+        ls
+        ./a.out
