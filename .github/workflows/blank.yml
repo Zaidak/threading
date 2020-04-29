@@ -31,3 +31,8 @@ jobs:
       run: |
         echo Add other actions to build,
         echo test, and deploy your project.
+        
+    - name: build
+      run: |
+        gcc -pthread answer.cpp
+        echo completed build, maybe?
