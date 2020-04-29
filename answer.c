@@ -93,11 +93,11 @@ int main(int argc, char **argv) {
     int i;
 
     for(i = 0; i < N; i++) {
-    //    pthread_create(NULL, NULL, reader_thread, NULL);
+        pthread_create(NULL, NULL, reader_thread, NULL);
     }
 
     for(i = 0; i < M; i++) {
-    //    pthread_create(NULL, NULL, writer_thread, NULL);
+        pthread_create(NULL, NULL, writer_thread, NULL);
     }
 
 
