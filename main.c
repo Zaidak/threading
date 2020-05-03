@@ -71,15 +71,27 @@ int count_writers =0, count_readers =0;
 void *reader_thread(void *arg) {
     //TODO: Define set-up required
 
+/// Lock RB
     while(COND) {
+
+/// Wait for RB has data and RB mutex
+
         //TODO: Define data extraction (queue) and processing
 
-        // read from ring buffer
-        // process read data
+/// read from ring buffer
+
+/// process read data
         /*       void process_data(char *buffer, int bufferSizeInBytes)
          *   Where buffer is a pointer to the data to be processed that is bufferSizeInBytes
          *   in length.
          */
+/// IF NOT towards t he end... how can I tell I am towards the end?? count R? then sleep for a bit?
+/// if(r_count < M - 2)
+///     sleep(rand()%3+1);
+
+
+
+/// UNLOCK RB
     }
 
     //  return NULL;
@@ -93,29 +105,30 @@ void *reader_thread(void *arg) {
  */
 void *writer_thread(void *arg) {
     //TODO: Define set-up required
-    LOCK_W_COUNT
-    printf("Creating writer thread #%i ID# %i\n", ++count_writers,(int)pthread_self());
-    UNLOCK_W_COUNT
+    LOCK_W_COUNT    printf("Creating writer thread #%i ID# %i\n", ++count_writers,(int)pthread_self());    UNLOCK_W_COUNT
 
-    char buff[WRITER_BUFFER_SIZE];
-    strcpy(buff,"abcabc");
-    int ret;
-    ret = get_external_data(buff,BUFFER_SIZE);
-    printf(" writer %i read: %s with return val %i\n", buff,ret);
-    //    print_read(buff,ret);
+
     while(COND) {
+///// LOCK RB
+
         //TODO: Define data extraction (device) and storage
+        char buff[WRITER_BUFFER_SIZE];
+        int ret;
 
         //TODO:  read from the serialized device
-        /*  int get_external_data(char *buffer, int bufferSizeInBytes)
-         *          Where buffer is a pointer to a storage of bufferSizeInBytes that can be filled in.
-         *          The return value from this function indicates the number of bytes that have been
-         *          filled in or < 0 on error.
-        */
-        printf(" writer TH read: % s with return val %i\n", /*buff,*/ret);
         ret = get_external_data(buff,BUFFER_SIZE);
-        printf(" writer TH read: % s with return val %i\n", /*buff,*/ret);
+        print_read(buff,ret);
         //TODO:  write to the ring buffer
+/// CALL RB.write(buff,ret);
+
+
+/// UNLOCK RB
+
+
+/// IF NOT towards t he end... how can I tell I am towards the end?? count W? then sleep for a bit?
+/// if(w_count < N - 2)
+///     sleep(rand()%3+1);
+///
 
     }
     // return NULL;
@@ -123,7 +136,7 @@ void *writer_thread(void *arg) {
     pthread_exit(NULL);
 }
 
-#define M 1 // 10   // writers
+#define M 4 // 10   // writers
 #define N 20   // readers
 
 pthread_t readers_th[N];
