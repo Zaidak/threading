@@ -1,13 +1,28 @@
-// build with gcc -pthread answer.c
+//#define _PRINT
 
+// build with gcc -pthread answer.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-// New headers
-#include "RingBuffer.h"
-#include "HelperFunctions.h"
-// New Headers To here
+
+#include <assert.h>
+#include <semaphore.h>
+
+#define M 10   // writers
+#define N 20   // readers
+
+#define BUFFER_SIZE 62
+
+#define min(A,B) (A>B?B:A)
+
+
+// synchronization objects
+pthread_mutex_t lock_buffer_shared = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t lock_count_readers = PTHREAD_MUTEX_INITIALIZER;     // to lock access to a counter of reader threads
+pthread_mutex_t lock_count_writers = PTHREAD_MUTEX_INITIALIZER;     // to lock access to a counter of writer threads
+pthread_mutex_t lock_printf = PTHREAD_MUTEX_INITIALIZER;            // to lock access to stdout
+sem_t sem_count_packets;                                            // to count packets created by writers and signal readers to consume and process data
 
 void process_data(char *buffer, int bufferSizeInBytes);
 int get_external_data(char *buffer, int bufferSizeInBytes);  // generates a string of up to 62 length
@@ -25,13 +40,11 @@ int get_external_data(char *buffer, int bufferSizeInBytes)
 
     val = (int)(random()%min(bufferSizeInBytes, 62));
 
-    //  printf("*** val is: %i\n", val);   // removemem
     if (bufferSizeInBytes < val)
         return (-1);
 
     strncpy(buffer, srcString, val);
-    /// ZAID ADDED .. maybe return or remove me    buffer[val] = '\0';         // added to enable printing with %s
-//    buffer[val]= '\0'; // add null char after the data read to make the buffer printable
+
     return val;
 }
 void process_data(char *buffer, int bufferSizeInBytes)
@@ -40,16 +53,23 @@ void process_data(char *buffer, int bufferSizeInBytes)
 
     if(buffer)
     {
+#ifdef _PRINT
+        pthread_mutex_lock(&lock_printf);
         printf("thread %i - ", (long int)pthread_self());
         for(i=0; i<bufferSizeInBytes; i++)
         {
             printf("%c", buffer[i]);
         }
         printf("\n");
+        pthread_mutex_unlock(&lock_printf);
+#endif
         memset(buffer, 0, bufferSizeInBytes);
     }
-    else
-        printf("error in process data - %i\n", (long int)pthread_self());
+    else{
+        pthread_mutex_lock(&lock_printf);
+        printf("~~~~error in process data - %d\n", (long int)pthread_self());
+        pthread_mutex_unlock(&lock_printf);
+    }
 
     return;
 }
@@ -60,19 +80,18 @@ void process_data(char *buffer, int bufferSizeInBytes)
 **********************************************************/
 
 //TODO Define global data structures to be used
-/*typedef struct RingBuffer RingBuffer;
-typedef struct RingBufferHandle RingBufferHandle;
-
-RingBuffer ring_buffer;*/
-
+// Assuming no memory constraints, linked list implementation of the shared memory buffer between readers and writers a simple and allows efficient read/write operations.
 typedef struct Packet{
-    struct Packet *next;
-    char *buff;
+    char buff[BUFFER_SIZE];
     int size;
+    struct Packet *next;
 }Packet;
 
-int r_count, w_count;
+Packet *head, *tail;
+//int readers_count, writers_count;
 int count_writers =0, count_readers =0;
+
+
 /**
  * This thread is responsible for pulling data off of the shared data
  * area and processing it using the process_data() API.
@@ -81,37 +100,46 @@ int count_writers =0, count_readers =0;
 void *reader_thread(void *arg) {
     //TODO: Define set-up required
 
-    pthread_mutex_lock(&r_count_lock);
-    int th_id = ++ r_count;
+    pthread_mutex_lock(&lock_count_readers);                        // removeme
+    int th_id = ++ count_readers;
+    pthread_mutex_lock(&lock_printf);
     printf("Creating reader <%i>  thread_self # %i\n",th_id,(long int)pthread_self());// locking for %i lock %i and count %i\n", (long int)pthread_self(),ring_buffer_lock.__data.__owner,ring_buffer_lock.__data.__lock,ring_buffer_lock.__data.__count);
-    pthread_mutex_unlock(&r_count_lock);
-            /// Lock RB
+    pthread_mutex_unlock(&lock_printf);
+    pthread_mutex_unlock(&lock_count_readers);                      // removeme
 
-    pthread_mutex_lock(&shared_buffer_lock);
+
+    Packet * take_out_packet;
     while(1) {
+        sem_wait(&sem_count_packets);                               //  wait until there's packets data in the buffer
 
-        /// Wait for RB has data and RB mutex
-        pthread_cond_wait(&not_empty,&shared_buffer_lock);
-        //TODO: Define data extraction (queue) and processing
+#ifdef _PRINT
+        pthread_mutex_lock(&lock_printf);
+        printf(" +REDER <%i> self: %i found non empty LL, records count %i!\n",th_id,(long int)pthread_self(),sem_count_packets);
+        pthread_mutex_unlock(&lock_printf);
+#endif
+        // data available, race for the head.
+        pthread_mutex_lock(&lock_buffer_shared);                    // LOCK
 
-        /// read from ring buffer
-        printf("++READER <%i> self: %i took the cond wait!\n", th_id, (long int)pthread_self());//(long int)pthread_self());
-        /// process read data
-        /*       void process_data(char *buffer, int bufferSizeInBytes)
-         *   Where buffer is a pointer to the data to be processed that is bufferSizeInBytes
-         *   in length.
-         */
-        /// IF NOT towards t he end... how can I tell I am towards the end?? count R? then sleep for a bit?
-        /// if(r_count < M - 2)
-        ///     sleep(rand()%3+1);
-        if(th_id < M-2)
-            USLEEP;
+#ifdef _PRINT
+        pthread_mutex_lock(&lock_printf);
+        printf("++READER <[%i]> self: %i took the buffer lock!\n", th_id, (long int)pthread_self());
+        pthread_mutex_unlock(&lock_printf);
+#endif
+        assert(head!=NULL);     // exit if reader is reading empty buffer.. semaphore wait would have failed then..
+        // take out first in packet
+        take_out_packet = head;
+        head = head->next;      // remove head from LL.
+        pthread_mutex_unlock(&lock_buffer_shared);                  // UN LOCK
 
-        /// UNLOCK RB
-        pthread_mutex_unlock(&shared_buffer_lock);
+
+        process_data(take_out_packet->buff,take_out_packet->size);
+#ifdef _PRINT
+        pthread_mutex_lock(&lock_printf);
+        printf("~~Reader <%i> is clearing mem~~\n",th_id);
+        pthread_mutex_unlock(&lock_printf);
+#endif
+        free(take_out_packet);                                     // cleanout processed packet
     }
-
-    //  return NULL;
     pthread_exit(NULL);
 }
 
@@ -122,84 +150,78 @@ void *reader_thread(void *arg) {
  */
 void *writer_thread(void *arg) {
     //TODO: Define set-up required
+    pthread_mutex_lock(&lock_count_writers);
+    int th_id = ++count_writers;
+    pthread_mutex_unlock(&lock_count_writers);
+    pthread_mutex_lock(&lock_printf);
+    printf("Creating writer <%i> thread_self: %i \n", count_writers, (long int)pthread_self());
+    pthread_mutex_unlock(&lock_printf);
 
-    pthread_mutex_lock(&w_count_lock);
-    int th_id = ++w_count;
-    printf("Creating writer <%i> thread_self: %i \n", w_count, (long int)pthread_self());
-    pthread_mutex_unlock(&w_count_lock);
+    Packet *new_packet = (Packet*) malloc(sizeof(*new_packet));                                         // create packet to add to the shared memory
     while(1) {
-        ///// LOCK RB       /////////////////////////////////////////////////////////////////////////////////////////
-        pthread_mutex_lock(&shared_buffer_lock);
-        //TODO: Define data extraction (device) and storage
-        char buff[WRITER_BUFFER_SIZE];
-        int size;
 
-        //TODO:  read from the serialized device
-        size = get_external_data(buff,BUFFER_SIZE);
-        assert(size >=0);       // get_external_data error
-        buff[size]='\0';        // make buff readable
-        print_read(buff,size);
-        //TODO:  write to the ring buffer
-        /// CALL RB.write(buff,ret);
-        /*if(has_space(ring_buffer, size)){
-            //pthread_cond_wait              ///////////////////////////////////////////////////////////////////////////////////////////
-            int a;
-        }*/
+        new_packet->size = get_external_data(new_packet->buff,BUFFER_SIZE);
+        assert(new_packet->size >=0);       // exit if get_external_data error
 
+        new_packet->buff[new_packet->size]='\0';        // make buff readable
 
-/////////// Should i ?? pthread_mutex_unlock(&ring_buffer_lock); /// ZAID
-        ///   Signal the cond
-        pthread_cond_signal(&not_empty);
-        /// UNLOCK RB       /////////////////////////////////////////////////////////////////////////////////////////
-        pthread_mutex_unlock(&shared_buffer_lock);
+#ifdef _PRINT
+        pthread_mutex_lock(&lock_printf);
+        printf("writer <%i> ",th_id);
+        pthread_mutex_unlock(&lock_printf);
+#endif
 
-        /// IF NOT towards t he end... how can I tell I am towards the end?? count W? then sleep for a bit?
-        if(th_id < N-2)
-            //usleep(rand()%USLEEP_UP_TO+1);
-            USLEEP;
+        pthread_mutex_lock(&lock_buffer_shared);                        // LOCK
+        if(head==NULL){
+#ifdef _PRINT
+            pthread_mutex_lock(&lock_printf);
+            printf("Writer  <%i> found empty LL buffer!. Setting LL only packet [%s]\n",th_id,new_packet->buff);
+            pthread_mutex_unlock(&lock_printf);
+#endif
+            head = tail = new_packet;                                   // only packet will be head and tail
+        }
+        else{
+#ifdef _PRINT
+            pthread_mutex_lock(&lock_printf);
+            printf("writer <%i> added [%s]\n",th_id,new_packet->buff);
+            pthread_mutex_unlock(&lock_printf);
+#endif
+            tail->next = new_packet;                                    // append new packet to the tail of the LL
+            tail = new_packet;                                          // new tail
+        }
+        pthread_mutex_unlock(&lock_buffer_shared);                      // UN LOCK
+
+        sem_post(&sem_count_packets);                                   // post packet_counter_sem
+        new_packet = (Packet*) malloc(sizeof(Packet));
     }
-    // return NULL;
-
     pthread_exit(NULL);
 }
 
-
-//pthread_t readers_th[N];
-//pthread_t writers_th[M];
-
 int main(int argc, char **argv) {
     int i;
-    r_count =0;
-    w_count =0;
+    count_readers =0;
+    count_writers =0;
 
     pthread_t readers_th[N];
     pthread_t writers_th[M];
 
-
-//    init_ring_buffer(ring_buffer);
-    //init_packet_buffer();
+    sem_init(&sem_count_packets,0,0);
 
     int pthread_create_result;
-
+    pthread_mutex_lock(&lock_printf);
     printf("Creating %i readers\n", N);
+    pthread_mutex_unlock(&lock_printf);
     for(i = 0; i < N; i++) {
         pthread_create_result = pthread_create(&readers_th[i], NULL, reader_thread, &i);
         assert(!pthread_create_result); // Exit if error creating reader pthread
     }
+    pthread_mutex_lock(&lock_printf);
     printf("Creating %i writers\n", M);
+    pthread_mutex_unlock(&lock_printf);
     for(i = 0; i < M; i++) {
         pthread_create_result = pthread_create(&writers_th[i], NULL, writer_thread, &i);
         assert(!pthread_create_result); // Exit if error when creating writer pthread
     }
 
-    for(i=M-1; i>=0;i--) pthread_join(writers_th[i], NULL);
-    for(i=N-1; i>=0;i--) pthread_join(readers_th[i], NULL);
-
-    printf("joined all threads ~~~~~~~~~~~~~~~~~~~~~~~\n");
-
-    pthread_mutex_destroy(&r_count_lock);
-    pthread_mutex_destroy(&w_count_lock);
-    pthread_mutex_destroy(&shared_buffer_lock);
-    return 0;
     pthread_exit(NULL);
 }
