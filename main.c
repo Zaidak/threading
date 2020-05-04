@@ -19,7 +19,7 @@ int get_external_data(char *buffer, int bufferSizeInBytes);  // generates a stri
 **********************************************************/
 int get_external_data(char *buffer, int bufferSizeInBytes)
 {
-    int status;             // ZAID - what's the purpose of this int?
+    // int status;             // unused variable comented out
     int val;
     char srcString[] = "0123456789abcdefghijklmnopqrstuvwxyxABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
@@ -30,7 +30,8 @@ int get_external_data(char *buffer, int bufferSizeInBytes)
         return (-1);
 
     strncpy(buffer, srcString, val);
-/// ZAID ADDED .. maybe return or remove me    buffer[val] = '\0';         // added to enable printing with %s
+    /// ZAID ADDED .. maybe return or remove me    buffer[val] = '\0';         // added to enable printing with %s
+//    buffer[val]= '\0'; // add null char after the data read to make the buffer printable
     return val;
 }
 void process_data(char *buffer, int bufferSizeInBytes)
@@ -39,7 +40,7 @@ void process_data(char *buffer, int bufferSizeInBytes)
 
     if(buffer)
     {
-        printf("thread %i - ", (int)pthread_self());
+        printf("thread %i - ", (long int)pthread_self());
         for(i=0; i<bufferSizeInBytes; i++)
         {
             printf("%c", buffer[i]);
@@ -48,7 +49,7 @@ void process_data(char *buffer, int bufferSizeInBytes)
         memset(buffer, 0, bufferSizeInBytes);
     }
     else
-        printf("error in process data - %i\n", (int)pthread_self());
+        printf("error in process data - %i\n", (long int)pthread_self());
 
     return;
 }
@@ -59,9 +60,18 @@ void process_data(char *buffer, int bufferSizeInBytes)
 **********************************************************/
 
 //TODO Define global data structures to be used
-typedef struct RingBuffer RingBuffer;
+/*typedef struct RingBuffer RingBuffer;
 typedef struct RingBufferHandle RingBufferHandle;
 
+RingBuffer ring_buffer;*/
+
+typedef struct Packet{
+    struct Packet *next;
+    char *buff;
+    int size;
+}Packet;
+
+int r_count, w_count;
 int count_writers =0, count_readers =0;
 /**
  * This thread is responsible for pulling data off of the shared data
@@ -71,27 +81,34 @@ int count_writers =0, count_readers =0;
 void *reader_thread(void *arg) {
     //TODO: Define set-up required
 
-/// Lock RB
-    while(COND) {
+    pthread_mutex_lock(&r_count_lock);
+    int th_id = ++ r_count;
+    printf("Creating reader <%i>  thread_self # %i\n",th_id,(long int)pthread_self());// locking for %i lock %i and count %i\n", (long int)pthread_self(),ring_buffer_lock.__data.__owner,ring_buffer_lock.__data.__lock,ring_buffer_lock.__data.__count);
+    pthread_mutex_unlock(&r_count_lock);
+            /// Lock RB
 
-/// Wait for RB has data and RB mutex
+    pthread_mutex_lock(&shared_buffer_lock);
+    while(1) {
 
+        /// Wait for RB has data and RB mutex
+        pthread_cond_wait(&not_empty,&shared_buffer_lock);
         //TODO: Define data extraction (queue) and processing
 
-/// read from ring buffer
-
-/// process read data
+        /// read from ring buffer
+        printf("++READER <%i> self: %i took the cond wait!\n", th_id, (long int)pthread_self());//(long int)pthread_self());
+        /// process read data
         /*       void process_data(char *buffer, int bufferSizeInBytes)
          *   Where buffer is a pointer to the data to be processed that is bufferSizeInBytes
          *   in length.
          */
-/// IF NOT towards t he end... how can I tell I am towards the end?? count R? then sleep for a bit?
-/// if(r_count < M - 2)
-///     sleep(rand()%3+1);
+        /// IF NOT towards t he end... how can I tell I am towards the end?? count R? then sleep for a bit?
+        /// if(r_count < M - 2)
+        ///     sleep(rand()%3+1);
+        if(th_id < M-2)
+            USLEEP;
 
-
-
-/// UNLOCK RB
+        /// UNLOCK RB
+        pthread_mutex_unlock(&shared_buffer_lock);
     }
 
     //  return NULL;
@@ -105,90 +122,84 @@ void *reader_thread(void *arg) {
  */
 void *writer_thread(void *arg) {
     //TODO: Define set-up required
-    LOCK_W_COUNT    printf("Creating writer thread #%i ID# %i\n", ++count_writers,(int)pthread_self());    UNLOCK_W_COUNT
 
-
-    while(COND) {
-///// LOCK RB
-
+    pthread_mutex_lock(&w_count_lock);
+    int th_id = ++w_count;
+    printf("Creating writer <%i> thread_self: %i \n", w_count, (long int)pthread_self());
+    pthread_mutex_unlock(&w_count_lock);
+    while(1) {
+        ///// LOCK RB       /////////////////////////////////////////////////////////////////////////////////////////
+        pthread_mutex_lock(&shared_buffer_lock);
         //TODO: Define data extraction (device) and storage
         char buff[WRITER_BUFFER_SIZE];
-        int ret;
+        int size;
 
         //TODO:  read from the serialized device
-        ret = get_external_data(buff,BUFFER_SIZE);
-        print_read(buff,ret);
+        size = get_external_data(buff,BUFFER_SIZE);
+        assert(size >=0);       // get_external_data error
+        buff[size]='\0';        // make buff readable
+        print_read(buff,size);
         //TODO:  write to the ring buffer
-/// CALL RB.write(buff,ret);
+        /// CALL RB.write(buff,ret);
+        /*if(has_space(ring_buffer, size)){
+            //pthread_cond_wait              ///////////////////////////////////////////////////////////////////////////////////////////
+            int a;
+        }*/
 
 
-/// UNLOCK RB
+/////////// Should i ?? pthread_mutex_unlock(&ring_buffer_lock); /// ZAID
+        ///   Signal the cond
+        pthread_cond_signal(&not_empty);
+        /// UNLOCK RB       /////////////////////////////////////////////////////////////////////////////////////////
+        pthread_mutex_unlock(&shared_buffer_lock);
 
-
-/// IF NOT towards t he end... how can I tell I am towards the end?? count W? then sleep for a bit?
-/// if(w_count < N - 2)
-///     sleep(rand()%3+1);
-///
-
+        /// IF NOT towards t he end... how can I tell I am towards the end?? count W? then sleep for a bit?
+        if(th_id < N-2)
+            //usleep(rand()%USLEEP_UP_TO+1);
+            USLEEP;
     }
     // return NULL;
 
     pthread_exit(NULL);
 }
 
-#define M 4 // 10   // writers
-#define N 20   // readers
 
-pthread_t readers_th[N];
-pthread_t writers_th[M];
+//pthread_t readers_th[N];
+//pthread_t writers_th[M];
 
 int main(int argc, char **argv) {
     int i;
-    // init Mutex
- /*   int mutex_init_result;
-    mutex_init_result = pthread_mutex_init(&w_count_lock,NULL);
-    assert(!mutex_init_result);
-    mutex_init_result = pthread_mutex_init(&r_count_lock,NULL);
-    assert(!mutex_init_result);
-*/
-    pthread_t readers_t[N];
-    pthread_t writers_t[M];
+    r_count =0;
+    w_count =0;
+
+    pthread_t readers_th[N];
+    pthread_t writers_th[M];
 
 
-    //// remove meee.....
-   /* char buff[BUFFER_SIZE];
-    for(i=0;i<100;i++){
-
-        int retSize= get_external_data(buff,BUFFER_SIZE);
-        printf("%i - %s\n",retSize,buff);
-    }
-    **/
-    /// remove me up to here
-
-    //    struct RingBuffer ring_buffer;
+//    init_ring_buffer(ring_buffer);
+    //init_packet_buffer();
 
     int pthread_create_result;
+
     printf("Creating %i readers\n", N);
     for(i = 0; i < N; i++) {
-        pthread_create_result = pthread_create(&readers_th[i], NULL, reader_thread, NULL);
+        pthread_create_result = pthread_create(&readers_th[i], NULL, reader_thread, &i);
         assert(!pthread_create_result); // Exit if error creating reader pthread
     }
     printf("Creating %i writers\n", M);
     for(i = 0; i < M; i++) {
-        pthread_create_result = pthread_create(&writers_th[i], NULL, writer_thread, NULL);
+        pthread_create_result = pthread_create(&writers_th[i], NULL, writer_thread, &i);
         assert(!pthread_create_result); // Exit if error when creating writer pthread
     }
 
+    for(i=M-1; i>=0;i--) pthread_join(writers_th[i], NULL);
+    for(i=N-1; i>=0;i--) pthread_join(readers_th[i], NULL);
 
-    long long x=0;
-    for(i=0;i<100000000;i++)x+=18%1000;
-
-    for(i=0; i<N;i++) pthread_join(readers_t[i], NULL);
-    for(i=0; i<M;i++) pthread_join(writers_t[i], NULL);
     printf("joined all threads ~~~~~~~~~~~~~~~~~~~~~~~\n");
 
-    pthread_mutex_destroy(&w_count_lock);
     pthread_mutex_destroy(&r_count_lock);
+    pthread_mutex_destroy(&w_count_lock);
+    pthread_mutex_destroy(&shared_buffer_lock);
     return 0;
     pthread_exit(NULL);
 }
